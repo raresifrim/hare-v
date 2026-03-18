@@ -1,0 +1,437 @@
+package decode_package;
+
+    //length of supported instructions; does not support compressed instructions for now
+    parameter int ILEN = 32;
+    // define the ROB DEPTH at the package level as this is needed to define the tag width
+    parameter int ROB_DEPTH = 32;
+
+    //instruction as bit vector
+    typedef bit [ILEN-1:0] bit_instruction_t;
+    typedef bit [31:0] rv32_data_t;
+    typedef bit [63:0] rv64_data_t;
+
+    //compressed opcode for the Execute stage
+    typedef enum bit[3:0]{
+        //I-base extension operations
+        ADD_OP  = 4'b0000,
+        SUB_OP  = 4'b0011,
+        AND_OP  = 4'b1100,
+        OR_OP   = 4'b1110,
+        XOR_OP  = 4'b0100
+    } alu_op_t;
+
+    typedef enum bit[3:0] {
+        MUL_OP    = 4'b0000,
+        MULH_OP   = 4'b0001,
+        MULHSU_OP = 4'b0011,
+        DIV_OP    = 4'b0100,
+        DIVU_OP   = 4'b0101,
+        REM_OP    = 4'b0110,
+        REMU_OP   = 4'b0111,
+        MULW_OP   = 4'b1000,
+        DIVW_OP   = 4'b1100,
+        DIVUW_OP  = 4'b1101,
+        REMW_OP   = 4'b1110,
+        REMUW_OP  = 4'b1111
+    } mul_div_op_t;
+
+    typedef enum bit [2:0]{
+        SRL_OP   = 3'b000,
+        SLL_OP   = 3'b001,
+        SRA_OP   = 3'b010,
+        ROTL_OP  = 3'b101,
+        ROTR_OP  = 3'b111
+    } shift_op_t;
+
+    //match branch codes
+    //R-type SLT and SLTU needs to be left-shifted by one
+    typedef enum bit [2:0] {
+        SEQ_OP = 3'b000,
+        SNE_OP = 3'b001,
+        SLT_OP = 3'b100,
+        SGE_OP = 3'b101,
+        SLTU_OP = 3'b110,
+        SGEU_OP = 3'b111
+    } comp_op_t;
+
+    typedef enum bit[2:0]{
+        REG,
+        IMM,
+        CONST, //will be 4 for RV32 and 8 for RV8
+        ZERO,
+        PC
+    } fu_src_t;
+
+    typedef enum bit [2:0]{
+        INT_ALU_UNIT,
+        BRANCH_JUMP_UNIT,
+        COMPARATOR_UNIT,
+        LOAD_STORE_UNIT,
+        SHIFTER_UNIT,
+        MUL_DIV_UNIT
+    } functional_unit_t;
+
+    typedef enum bit [1:0] {
+        NONE = 2'b00,
+        EQ   = 2'b01, //EQUAL
+        LT   = 2'b10, //LESS THAN
+        GT   = 2'b11  //GREATER THAN
+    } magnitude_comp_t;
+
+    typedef enum bit [2:0] {
+        BEQ_OP = 3'b000,
+        BNE_OP = 3'b001,
+        BLT_OP = 3'b100,
+        BGE_OP = 3'b101,
+        BLTU_OP = 3'b110,
+        BGEU_OP = 3'b111,
+        JAL_OP  = 3'b010,
+        JALR_OP = 3'b011
+    } branch_jump_t;
+
+    typedef enum bit [3:0] {
+        LB_OP = 4'b0000,
+        LH_OP = 4'b0001,
+        LW_OP = 4'b0010,
+        LBU_OP = 4'b0100,
+        LHU_OP = 4'b0101,
+        LWU_OP = 4'b0110,
+        LD_OP = 4'b0011,
+        SB_OP = 4'b1000,
+        SH_OP = 4'b1001,
+        SW_OP = 4'b1010,
+        SD_OP = 4'b1011
+    } load_store_t;
+
+    typedef union {
+        alu_op_t alu_op;
+        load_store_t load_store_op;
+        branch_jump_t branch_jump_op;
+        comp_op_t comp_op;
+        shift_op_t shift_op;
+    } fu_op_t;
+
+    //main constrol signals for the entire CPU pipeline
+    typedef struct packed {
+        bit RegWrite;
+        bit Load;
+        bit Store;
+        bit Branch;
+        bit Jump;
+        fu_src_t FuSrc1;
+        fu_src_t FuSrc2;
+        bit Exception;
+    } control_data_t;
+
+    //instruction in a packet format with main fields
+    typedef struct packed {
+        bit [6:0] Funct7;
+        bit [4:0] Rs2;
+        bit [4:0] Rs1;
+        bit [2:0] Funct3;
+        bit [4:0] Rd;
+        bit [6:0] Opcode;
+    } packed_instruction_t;
+
+    typedef union packed {
+        bit_instruction_t raw;
+        packed_instruction_t fields;
+    } instruction_t;
+
+    //packed data type that contains a instrunction and its PC for RV32
+    typedef struct packed {
+        instruction_t instr;
+        rv32_data_t pc;
+    } rv32_instr_pc_packet_t;
+
+    //packed data type that contains a instrunction and its PC for RV64
+    typedef struct packed {
+        instruction_t instr;
+        rv64_data_t pc;
+    } rv64_instr_pc_packet_t;
+
+    //unpacked decoded instruction for RV32
+    typedef struct {
+        bit [4:0] Rs2;
+        bit [4:0] Rs1;
+        bit [4:0] Rd;
+        rv32_data_t Imm;
+        rv32_data_t Pc;
+        functional_unit_t FunctionalUnitType;
+        fu_op_t FunctionalUnitOp;
+        control_data_t ControlData;
+    } rv32i_decoded_instruction_t;
+
+    //unpacked decoded instruction for RV64
+    typedef struct {
+        bit [4:0] Rs2;
+        bit [4:0] Rs1;
+        bit [4:0] Rd;
+        rv64_data_t Imm;
+        rv64_data_t Pc;
+        functional_unit_t FunctionalUnitType;
+        fu_op_t FunctionalUnitOp;
+        control_data_t ControlData;
+    } rv64i_decoded_instruction_t;
+
+    class rv32iDecoder;
+
+        typedef rv32i_decoded_instruction_t decoded_instruction_t;
+
+        //main decode function, should be used by any RV32-type extending child decoder class as it is, don't need to overrride it
+        function decoded_instruction_t decodeInstruction(instruction_t instr, rv32_data_t pc);
+
+            decoded_instruction_t decoded_instr;
+
+            decoded_instr.Pc = pc;
+            decoded_instr.Rd = instr.fields.Rd;
+            decoded_instr.Rs1 = instr.fields.Rs1;
+            decoded_instr.Rs2 = instr.fields.Rs2;
+            decoded_instr.Imm = this.decodeImmData(instr);
+            decoded_instr.FunctionalUnitType = this.decodeFuType(instr.fields.Opcode[6:2],instr.fields.Funct3);
+            decoded_instr.FunctionalUnitOp = this.decodeFuOp(instr.fields.Opcode[6:2],instr.fields.Funct3, instr.fields.Funct7);
+            decoded_instr.ControlData = this.decodeControlData(instr.fields.Opcode[6:2]);
+
+            return decoded_instr;
+        endfunction
+
+       function control_data_t decodeControlData(bit [4:0] opcode);
+
+            control_data_t control_signals = '{
+                RegWrite: 1'b0,
+                Load: 1'b0,
+                Store: 1'b0,
+                Branch: 1'b0,
+                Jump: 1'b0,
+                FuSrc1: ZERO,
+                FuSrc2: ZERO,
+                Exception: 1'b0
+            };
+
+            unique case (opcode) inside
+
+                //Imm-Type
+                5'b01100: begin
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.FuSrc1 = REG;
+                    control_signals.FuSrc2 = IMM;
+                end
+                //Load-Type
+                5'b00000: begin
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.Load = 1'b1;
+                    control_signals.FuSrc1 = REG;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                //Store-Type
+                5'b01000: begin
+                    control_signals.Store = 1'b1;
+                    control_signals.FuSrc1 = REG;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                 //U-Type LUI
+                5'b01101: begin
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.FuSrc1 = ZERO;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                //U-Type AUIPC
+                5'b00101: begin
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.FuSrc1 = PC;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                //B-Type
+                5'b11000: begin
+                    control_signals.Branch = 1'b1;
+                    control_signals.FuSrc1 = REG;
+                    control_signals.FuSrc2 = REG;
+                end
+
+                //J-Type Jal
+                5'b11011: begin
+                    control_signals.Jump = 1'b1;
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.FuSrc1 = PC;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                //J-Type Jalr
+                5'b11001: begin
+                    control_signals.Jump = 1'b1;
+                    control_signals.RegWrite = 1'b1;
+                    control_signals.FuSrc1 = REG;
+                    control_signals.FuSrc2 = IMM;
+                end
+
+                //Exception raised - undefined opcode
+                default: control_signals.Exception = 1'b1;
+            endcase
+
+            return control_signals;
+        endfunction
+
+        function functional_unit_t decodeFuType(bit [4:0] opcode, bit [2:0] funct3);
+
+            functional_unit_t fu_type = INT_ALU_UNIT;
+            unique case ({opcode, funct3}) inside
+
+                //R+I-Type Shift operations
+                8'b0?100_?01: fu_type = SHIFTER_UNIT;
+
+                //R+I-Type SLT operations
+                8'b0?100_01?: fu_type = COMPARATOR_UNIT;
+
+                //Load+Store-Type
+                8'b0?000_???: fu_type = LOAD_STORE_UNIT;
+
+                //U-Type
+                8'b0?101_???: fu_type = INT_ALU_UNIT;
+
+                //B-Type
+                8'b11000_???,
+                //J-Type
+                8'b11011_???: fu_type = BRANCH_JUMP_UNIT;
+
+                default: fu_type = INT_ALU_UNIT; //any other R/I-type instructions
+            endcase
+
+            return fu_type;
+        endfunction
+
+        function fu_op_t decodeFuOp(bit [4:0] opcode, bit[2:0] funct3, bit[6:0] funct7);
+            fu_op_t execute_opcode;
+            unique case({opcode, funct3,funct7[5]}) inside
+                9'b00000_???_?: /*LOAD*/    execute_opcode.load_store_op = load_store_t'({1'b0, funct3});
+                9'b01000_???_?: /*STORE*/   execute_opcode.load_store_op = load_store_t'({1'b1, funct3});
+                9'b11011_???_?: /*JAL*/     execute_opcode.branch_jump_op = JAL_OP;
+                9'b11001_???_?: /*JALR*/    execute_opcode.branch_jump_op = JALR_OP;
+                9'b0?101_???_?, /*LUI,AUIPC*/
+                9'b01100_000_0, /*ADD*/
+                9'b00100_000_?: /*ADDI*/    execute_opcode.alu_op = ADD_OP;
+                9'b0?100_111_?: /*AND(I)*/  execute_opcode.alu_op = AND_OP;
+                9'b0?100_110_?: /*OR(I)*/   execute_opcode.alu_op = OR_OP;
+                9'b0?100_100_?: /*XOR(I)*/  execute_opcode.alu_op = XOR_OP;
+                9'b01100_000_1: /*SUB*/     execute_opcode.alu_op = SUB_OP;
+                9'b0?100_001_?: /*SLL(I)*/  execute_opcode.shift_op = SLL_OP;
+                9'b0?100_101_0: /*SRL(I)*/  execute_opcode.shift_op = SRL_OP;
+                9'b0?100_101_1: /*SRA(I)*/  execute_opcode.shift_op = SRA_OP;
+                9'b11000_???_?: /*BRANCH*/  execute_opcode.branch_jump_op = branch_jump_t'(funct3);
+                9'b01100_010_?: /*SLT(I)*/  execute_opcode.comp_op = SLT_OP;
+                9'b01100_011_?: /*SLTU(I)*/ execute_opcode.comp_op = SLTU_OP;
+                default: execute_opcode.alu_op = alu_op_t'('0);
+            endcase
+            return execute_opcode;
+        endfunction
+
+        function rv32_data_t decodeImmData(instruction_t instruction);
+
+            rv32_data_t imm_data = '0;
+            bit sign_bit = instruction.raw[ILEN-1];
+
+            unique case (instruction.fields.Opcode[6:2]) inside
+
+                //Imm-Type
+                5'b00100: imm_data = {{($bits(imm_data)-12){sign_bit}}, instruction.raw[31:20]};
+
+                //Load-Type
+                5'b00000: imm_data = {{($bits(imm_data)-12){sign_bit}}, instruction.raw[31:20]};
+
+                //Store-Type
+                5'b01000: imm_data = {{($bits(imm_data)-12){sign_bit}}, instruction.raw[31:25], instruction.raw[11:7]};
+
+                //U-Type LUI
+                5'b01101: imm_data = {instruction.raw[31:12], {12{1'b0}}};
+
+                //U-Type AUIPC
+                5'b00101: imm_data = {instruction.raw[31:12], {12{1'b0}}};
+
+                //B-Type
+                5'b11000: imm_data = {{($bits(imm_data)-13){sign_bit}}, instruction.raw[31], instruction.raw[7], instruction.raw[30:25], instruction.raw[11:8], 1'b0};
+
+                //J-Type Jal
+                5'b11011: imm_data = {{12{sign_bit}}, instruction.raw[19:12], instruction.raw[20], instruction.raw[30:21], 1'b0};
+
+                //J-Type Jalr
+                5'b11001: imm_data = {{20{sign_bit}}, instruction.raw[31:20]};
+
+                //no other case
+                default: imm_data = '0;
+            endcase
+
+            return imm_data;
+        endfunction
+
+    endclass
+
+    class rv64iDecoder extends rv32iDecoder;
+
+        typedef rv64i_decoded_instruction_t decoded_instruction_t;
+
+        //main decode function, should be used by any RV64-type extending child decoder class as it is, don't need to overrride it
+        function decoded_instruction_t decodeInstruction(instruction_t instr, rv64_data_t pc);
+
+            decoded_instruction_t decoded_instr;
+
+            decoded_instr.Pc = pc;
+            decoded_instr.Rd = instr.fields.Rd;
+            decoded_instr.Rs1 = instr.fields.Rs1;
+            decoded_instr.Rs2 = instr.fields.Rs2;
+            decoded_instr.Imm = this.decodeImmData(instr);
+            decoded_instr.FunctionalUnitType = this.decodeFuType(instr.fields.Opcode[6:2],instr.fields.Funct3);
+            decoded_instr.FunctionalUnitOp = this.decodeFuOp(instr.fields.Opcode[6:2],instr.fields.Funct3, instr.fields.Funct7);
+            decoded_instr.ControlData = this.decodeControlData(instr.fields.Opcode[6:2]);
+
+            return decoded_instr;
+        endfunction
+
+        function control_data_t decodeControlData(bit [4:0] opcode);
+
+            control_data_t control_signals = '{
+                RegWrite: 1'b0,
+                Load: 1'b0,
+                Store: 1'b0,
+                Branch: 1'b0,
+                Jump: 1'b0,
+                FuSrc1: ZERO,
+                FuSrc2: ZERO,
+                Exception: 1'b0
+            };
+            unique case (opcode) inside
+                default: control_signals = super.decodeControlData(opcode);
+            endcase
+
+            return control_signals;
+        endfunction
+
+        function functional_unit_t decodeFuType(bit [4:0] opcode, bit [2:0] funct3);
+            functional_unit_t fu_type = INT_ALU_UNIT;
+            unique case ({opcode, funct3}) inside
+                default: fu_type = super.decodeFuType(opcode, funct3);
+            endcase
+            return fu_type;
+        endfunction
+
+        function fu_op_t decodeFuOp(bit [4:0] opcode, bit[2:0] funct3, bit[6:0] funct7);
+            fu_op_t execute_opcode;
+            unique case({opcode, funct3, funct7[5]}) inside
+                default: execute_opcode = super.decodeFuOp(opcode, funct3, funct7);
+            endcase
+            return execute_opcode;
+        endfunction
+
+        function rv64_data_t decodeImmData(instruction_t instruction);
+           rv32_data_t imm_data = '0;
+           unique case (instruction.fields.Opcode[6:2]) inside
+                default: imm_data = super.decodeImmData(instruction);
+           endcase
+           return {{32{imm_data[31]}}, imm_data};
+        endfunction
+
+    endclass
+
+endpackage
