@@ -12,18 +12,18 @@ class MemoryMap #(parameter type DATA_T = decode_package::rv32_data_t);
     
     local Peripheral#(.DATA_T(DATA_T)) map [DATA_T];
     typedef Peripheral::data_pkt data_pkt;
-    local int DATA_WIDTH = $bits(DATA_T);
-    local int WORD_WIDTH = (DATA_WIDTH/8); 
-    local int WORD_SIZE = 8;
+    localparam int DATA_WIDTH = $bits(DATA_T);
+    localparam int WORD_WIDTH = (DATA_WIDTH/8); 
+    localparam int WORD_SIZE = 8;
 
     static function MemoryMap get(); // function to return singleton handle
-        if(this.memory_map_singleton == null)
-            this.memory_map_singleton = new; // create a_singleton once only
-        return this.memory_map_singleton;
+        if(memory_map_singleton == null)
+            memory_map_singleton = new; // create a_singleton once only
+        return memory_map_singleton;
     endfunction
 
     function void addMemoryRegion(Peripheral p);
-        if (type(this::DATA_T) == type(p::DATA_T))
+        if (type(this.DATA_T) == type(p.DATA_T))
             if(map.exists(p.getBaseAddress()) || this.findBaseAddress(p.getBaseAddress()))
                 $display("ERROR[MemoryMap]: there is already a memory region mapped at address %x", p.getBaseAddress());
             else
@@ -76,7 +76,7 @@ class MemoryMap #(parameter type DATA_T = decode_package::rv32_data_t);
         byte buffer[];
 
         if (binary != "") begin
-            $write("[Core Test]: Preloading ELF: %s", binary);
+            $write("[LOAD ELF]: Preloading ELF: %s", binary);
 
             read_elf(binary);
 
@@ -84,7 +84,7 @@ class MemoryMap #(parameter type DATA_T = decode_package::rv32_data_t);
             // while there are more sections to process
             while (get_section(address, len)) begin
                 automatic int num_words = (len+3)/4;
-                $write( "[Core Test]: Loading Address: %x, Length: %x", address, len);
+                $write( "[LOAD ELF]: Loading Address: %x, Length: %x", address, len);
                 buffer = new [num_words*8];
                 read_section_sv(address, buffer);
                 // preload memories
@@ -96,10 +96,14 @@ class MemoryMap #(parameter type DATA_T = decode_package::rv32_data_t);
                     end
                     load_address = (address[23:0] >> 2) + i;
                     if (load_address != last_load_address) begin
-                        this.write(load_address, mem_row, 4);
+                        data_pkt resp = this.write(load_address, mem_row, 8'hF);
+                        if(resp.err == 1'b1) begin
+                            $display("[LOAD ELF]: Error while trying to write %x at %x", mem_row, load_address);
+                            $stop;
+                        end
                         last_load_address = load_address;
                     end else begin
-                        $write( "[Debug info]: Address: %x Already Loaded! ELF file might have less than 64 bits granularity on segments.", load_address);
+                        $display( "[LOAD ELF]: Address: %x Already Loaded! ELF file might have less than 64 bits granularity on segments.", load_address);
                     end
 
                 end

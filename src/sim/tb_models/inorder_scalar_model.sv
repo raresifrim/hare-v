@@ -14,10 +14,11 @@ class ScalarInorderModel#(
     //memory_map is a singleton available in multiple places, but the memory map should only be handled in here
     protected MemoryMap #(.DATA_T(DATA_T)) memory_map;
 
-    function new(DATA_T pc_address, int icache_depth, int dcache_depth);
+    function new();
 
-        this.frontend = new(pc_address, icache_depth);
+        this.frontend = new();
         this.rob = new();
+        this.memory_map = MemoryMap::get();
 
         //initialize one funtional unit of each type
         this.functional_units[INT_ALU_UNIT] = new(.fu_type(INT_ALU_UNIT));
@@ -28,8 +29,12 @@ class ScalarInorderModel#(
 
     endfunction
 
+    function automatic void setPC(DATA_T start_address);
+        this.frontend.setPC(start_address);
+    endfunction
+
     function automatic void load_elf(string binary);
-        this.frontend.load_elf(binary);
+        this.memory_map.load_elf(binary);
     endfunction
 
     task fetchAndDecode (ref logic clk);

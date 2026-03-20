@@ -31,23 +31,27 @@ class RVFrontend #(
         DATA_T Imm;
     } fu_packet_t;
 
+    //ports/queues to each functional unit type
     fu_packet_t functional_units [functional_unit_t][$];
 
     //regsiter bank
-    regfile_t regfile;
-    //instruction memory
-    //one 32-bit instruction per row
-    bit [ILEN-1:0] icache [];
+    protected regfile_t regfile;
+    
+    //access to memory map for ICache 
+    protected MemoryMap #(.DATA_T(DATA_T)) memory_map;
+
     //current program counter
-    DATA_T pc = '0;
+    protected DATA_T pc = '0;
+
     //queue of decoded instructions ready to be dispatched by a scheduler
     DECODER_T::decoded_instruction_t instruction_queue [$];
     DECODER_T decoder;
 
-    function new(int icache_depth, DATA_T start_address);
+    function new();
 
-        //initialize instruction memory
-        this.icache = new [icache_depth];
+        //initialize memory map and decoder
+        this.memory_map = MemoryMap::get();
+        this.decoder = new();
 
         //initialize reg file
         for(int i=0;i<32;i++) begin
@@ -56,9 +60,6 @@ class RVFrontend #(
             this.regfile.tag[i] = '0;
             this.regfile.locks[i] = new(1);
         end
-
-        //set pc to start address
-        this.pc = start_address;
 
         //initialize one funtional unit of each type
         this.functional_units = '{
@@ -72,6 +73,9 @@ class RVFrontend #(
 
     endfunction
 
+    function automatic void setPC(DATA_T start_address);
+        this.pc = start_address;
+    endfunction
 
     function automatic bit instrQueueEmpty();
         return this.instruction_queue.size() == 0;
@@ -88,7 +92,7 @@ class RVFrontend #(
         DATA_T new_pc = pc + 4; //assume normal flow
 
         //read and decode instruction
-        decode_package::instruction_t current_instr = instruction_t'(icache[this.pc]);
+        decode_package::instruction_t current_instr = instruction_t'(memory_map.read(this.pc, 8'hF).data);
         DECODER_T::decoded_instruction_t decoded_instr;
         decoded_instr = this.decoder.decodeInstruction(current_instr);
 
@@ -145,7 +149,9 @@ class RVFrontend #(
 
             //consume instruction and dispatch it to the FU
             DECODER_T::decoded_instruction_t top_instr = this.instruction_queue.pop_front();
-
+            //prepare pkt to be sent to a functional unit
+            fu_packet_t pkt = '{default:'0};
+            //read data from register file
             DATA_T rs1_data, rs2_data;
             bit rs1_ready, rs2_ready;
             bit [ROBTAG_WIDTH-1:0] rs1_tag, rs2_tag;
@@ -165,20 +171,18 @@ class RVFrontend #(
             this.allocateRegister(top_instr.Rd, rd_robtag);
 
             //fill packet for FU
-            fu_packet_t pkt = '{
-                top_instr.FunctionalUnitOp,
-                rs1_data,
-                rs2_data,
-                rs1_ready,
-                rs2_ready,
-                rs1_tag,
-                rs2_tag,
-                top_instr.Rd,
-                rd_robtag
-                top_instr.ControlData,
-                top_instr.Pc,
-                top_instr.Imm
-            };
+            pkt.OpType      = top_instr.FunctionalUnitOp;
+            pkt.Rs1Data     = rs1_data;
+            pkt.Rs2Data     = rs2_data;
+            pkt.Rs1Ready    = rs1_ready;
+            pkt.Rs2Ready    = rs2_ready;
+            pkt.Rs1Tag      = rs1_tag;
+            pkt.Rs2Tag      = rs2_tag;
+            pkt.RdAddr      = top_instr.Rd;
+            pkt.RdTag       = rd_robtag;
+            pkt.ControlData = top_instr.ControlData;
+            pkt.Pc          = top_instr.Pc;
+            pkt.Imm         = top_instr.Imm;
 
             //dispath it in the queue of the FU
             this.functional_units[top_instr.FunctionalUnitType].push_back(pkt);

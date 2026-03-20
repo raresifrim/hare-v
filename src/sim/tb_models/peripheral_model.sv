@@ -6,10 +6,9 @@ virtual class Peripheral #(parameter type DATA_T = decode_package::rv32_data_t);
     protected string name = "Generic Peripheral";
     protected DATA_T base_address;
     protected int size = 1024;
-    protected int DATA_WIDTH = $bits(DATA_T);
-    protected int WORD_WIDTH = (DATA_WIDTH/8); //4 or 8 words depending if RV32 or RV64
-    protected int SELECT_WIDTH = $clog2(WORD_WIDTH);
-    protected int WORD_SIZE = 8; //8-bit word size
+    localparam int DATA_WIDTH = $bits(DATA_T);
+    localparam int WORD_WIDTH = (DATA_WIDTH/8); //4 or 8 words depending if RV32 or RV64
+    localparam WORD_SIZE = 8; //8-bit word size
 
     //byte-alligned memory
     protected bit [WORD_SIZE-1:0] mem_region [];
@@ -23,7 +22,7 @@ virtual class Peripheral #(parameter type DATA_T = decode_package::rv32_data_t);
     function new(DATA_T base_address, int size);
         this.base_address = base_address;
         this.size = size;
-        this.mem_region = new[depth];
+        this.mem_region = new[size];
         this.name = name;
     endfunction
 
@@ -41,6 +40,7 @@ virtual class Peripheral #(parameter type DATA_T = decode_package::rv32_data_t);
 
     virtual function data_pkt read(DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
         data_pkt pkt = '{default: '0};
+        if (data_select)
         if(this.addressWithinRange(address) && !this.addressMisaligned(address, data_select)) begin
             for (int i = 0; i < this.WORD_WIDTH; i = i + 1)
                 if(data_select[i])
@@ -66,7 +66,7 @@ virtual class Peripheral #(parameter type DATA_T = decode_package::rv32_data_t);
         return pkt;
     endfunction
 
-    virtual function bit addressWithinRegion(DATA_T address);
+    virtual function bit addressWithinRange(DATA_T address);
         return address >= this.base_address && address < this.base_address + this.size;
     endfunction;
 
@@ -86,21 +86,52 @@ virtual class Peripheral #(parameter type DATA_T = decode_package::rv32_data_t);
 endclass
 
 class DCache #(parameter type DATA_T = decode_package::rv32_data_t) extends Peripheral #(DATA_T);
-    protected string name = "DCACHE";
+
+    function new(DATA_T base_address, int size);
+        super.new(base_address, size);
+        this.name = "DCACHE";
+    endfunction
+
+    virtual function void onWrite(ref data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+        //empty function
+    endfunction
+
+    virtual function void onRead(ref data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+        //empty function
+    endfunction
 endclass
 
 class ICache #(parameter type DATA_T = decode_package::rv32_data_t) extends Peripheral #(DATA_T);
-    protected string name = "ICACHE";
+    
+    function new(DATA_T base_address, int size);
+        super.new(base_address, size);
+        this.name = "ICACHE";
+    endfunction
+
+    virtual function void onWrite(ref data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+        //empty function
+    endfunction
+
+    virtual function void onRead(ref data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+        //empty function
+    endfunction
 endclass
 
 class Uart #(parameter type DATA_T = decode_package::rv32_data_t) extends Peripheral #(DATA_T);
-    protected string name = "UART";
+    
+    function new(DATA_T base_address, int size);
+        super.new(base_address, size);
+        this.name = "UART";
+    endfunction
     
     //currently only UART TX is supported
-    virtual function onWrite(ref Peripheral::data_pkt pkt, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+    virtual function void onWrite(ref Peripheral::data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
         if(address == this.base_address + 4'h4 && data_select[0] == 1'b1) begin
-            $write("%c", pkt.data[7:0]);
+            $write("%c", data.data[7:0]);
         end
     endfunction
 
+    virtual function void onRead(ref data_pkt data, DATA_T address, bit [this.WORD_WIDTH-1:0] data_select);
+        //empty function
+    endfunction
 endclass
