@@ -28,7 +28,7 @@ class ReorderBuffer#(parameter type DATA_T = decode_package::rv32_data_t);
     endfunction
 
     function automatic bit canCommit();
-        return this.rob_fifo[this.rd_ptr].RdReady;
+        return (this.rob_fifo[this.rd_ptr].RegWrite && this.rob_fifo[this.rd_ptr].RdReady) || this.rob_fifo[this.rd_ptr].Store || this.rob_fifo[this.rd_ptr].Branch;
     endfunction
 
     function bit [ROBTAG_WIDTH-1:0] getNewTag();
@@ -70,20 +70,22 @@ class ReorderBuffer#(parameter type DATA_T = decode_package::rv32_data_t);
         return this.rob_fifo[rd_robtag].RdValue;
     endfunction
 
-    task automatic commit(output DATA_T rd_value, output bit [4:0] rd_addr, output bit reg_write, output bit is_store);
+    task automatic commit(output DATA_T o_rd_value, output bit [4:0] o_rd_addr, output bit o_reg_write, output bit o_is_store, output bit [ROBTAG_WIDTH-1:0] o_robtag);
         if(this.canCommit()) begin
             rob_data_t top_row = this.rob_fifo[this.rd_ptr];
-            rd_value = top_row.RdValue;
-            rd_addr = top_row.RdAddr;
-            reg_write = top_row.RegWrite;
-            is_store = top_row.Store;
+            o_rd_value = top_row.RdValue;
+            o_rd_addr = top_row.RdAddr;
+            o_reg_write = top_row.RegWrite;
+            o_is_store = top_row.Store;
+            o_robtag = this.rd_ptr;
             this.rd_ptr++;
         end
         else begin
-            rd_value = '0;
-            rd_addr = '0;
-            reg_write = '0;
-            is_store = '0;
+            o_rd_value = '0;
+            o_rd_addr = '0;
+            o_reg_write = '0;
+            o_is_store = '0;
+            o_robtag = this.rd_ptr;
         end
     endtask
 
@@ -94,4 +96,11 @@ class ReorderBuffer#(parameter type DATA_T = decode_package::rv32_data_t);
         this.wr_ptr = robtag;
     endfunction
 
+    function automatic bit storeCommitReady();
+        return this.rob_fifo[this.rd_ptr].Store;
+    endfunction
+
+    function automatic bit[ROBTAG_WIDTH-1:0] topCommitTag();
+        return this.this.rd_ptr;
+    endfunction
 endclass

@@ -70,7 +70,7 @@ class MemoryMap #(parameter type DATA_T = decode_package::rv32_data_t);
         return pkt;
     endfunction
 
-    function automatic void load_elf(string binary);
+    function automatic void loadELF(string binary);
         automatic logic [7:0][3:0] mem_row;
         longint address, load_address, last_load_address, len;
         byte buffer[];

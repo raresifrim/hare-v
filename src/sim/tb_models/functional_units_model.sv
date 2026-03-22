@@ -6,19 +6,12 @@ class FunctionalUnit#(
     parameter int LATENCY = 1
 );
 
+    localparam int NUM_BYTES = $bits(DATA_T)/8;
     protected functional_unit_t fu_type;
-    protected DATA_T dcache [];
     localparam int ROBTAG_WIDTH = $clog2(ROB_DEPTH);
 
     function new(functional_unit_t fu_type = INT_ALU_UNIT);
         this.fu_type = fu_type;
-        if (fu_type == LOAD_STORE_UNIT)
-            this.dcache = new[1024];
-    endfunction
-
-    //used for a load/store functional unit type
-    function automatic void setCacheDepth(int dcache_depth = 1024);
-        this.dcache = new[dcache_depth]; //needed for load/store units
     endfunction
 
     //publically accesible task that should be called by the instances of this class
@@ -33,7 +26,7 @@ class FunctionalUnit#(
         input logic [ROBTAG_WIDTH-1:0] i_robtag,
         output DATA_T o_rd,
         output DATA_T o_pc,
-        output DATA_T o_taken,
+        output logic o_taken,
         output logic  o_valid,
         output logic [ROBTAG_WIDTH-1:0] o_robtag,
         input logic i_store_valid,
@@ -173,9 +166,7 @@ class FunctionalUnit#(
         static DATA_T data_queue[$];
         static logic [ROBTAG_WIDTH-1:0] robtag_queue[$];
         static bit valid_queue[$];
-
-        DATA_T head_address, head_data;
-        load_store_t head_op;
+        static MemoryMap memory_map = MemoryMap::get();
 
         o_valid = '0;
 
@@ -203,18 +194,57 @@ class FunctionalUnit#(
             //pop instruction from queue if not empty and write or read data
             if(address_queue.size() && op_queue[0][3] == '0 && valid_queue[0] == '1) begin
                 //if we have a valid load at head of queue then pop it directly
-                op_queue.pop_front(); //TODO: actually interpret each kind of load
+                automatic DATA_T address = address_queue.pop_front();
+                automatic load_store_t lsop = op_queue.pop_front();
+                automatic bit [NUM_BYTES-1:0] data_select;
+                automatic Peripheral::data_pkt pkt;
+                
+                unique case(lsop) inside
+                    LB_OP: data_select = NUM_BYTES'(1'b1);
+                    LH_OP: data_select = NUM_BYTES'(2'b11);
+                    LW_OP: data_select = NUM_BYTES'(4'b1111);
+                    LBU_OP: data_select = NUM_BYTES'(1'b1);
+                    LHU_OP: data_select = NUM_BYTES'(2'b11);
+                    LWU_OP: data_select = NUM_BYTES'(4'b1111);
+                    LD_OP: data_select = NUM_BYTES'(8'b1111_1111); 
+                endcase
+
+                //load data and send it for commitment to ROB
+                pkt = memory_map.read(address, data_select);
+                if (pkt.ack)
+                    o_rd = pkt.data;
+                else if(pkt.err) begin
+                    $display("[FuntionalUnit LSU]: Error on reading data from address %x", address);
+                    $stop;
+                end
+
                 o_valid = valid_queue.pop_front();
-                o_rd = this.dcache[address_queue.pop_front()]; //load data and send it for commitment to ROB
                 o_robtag = robtag_queue.pop_front();
-                data_queue.pop_front();
+                data_queue.pop_front(); //nothing to do here, just consume the entry
             end
             else if(address_queue.size() && op_queue[0][3] == '1 && valid_queue[0] == '1) begin
-                op_queue.pop_front(); //TODO: actually interpret each kind of store
+                automatic DATA_T address = address_queue.pop_front();
+                automatic load_store_t lsop = op_queue.pop_front();
+                automatic bit [NUM_BYTES-1:0] data_select;
+                automatic Peripheral::data_pkt pkt;
+                
+                unique case(lsop) inside
+                    SB_OP: data_select = NUM_BYTES'(1'b1);
+                    SH_OP: data_select = NUM_BYTES'(2'b11);
+                    SW_OP: data_select = NUM_BYTES'(4'b1111);
+                    SD_OP: data_select = NUM_BYTES'(8'b1111_1111); 
+                endcase
+
+                //store data into memory
+                pkt = memory_map.write(address, data_queue.pop_front(), data_select);
+                if (pkt.err) begin
+                    $display("[FuntionalUnit LSU]: Error on writing data to address %x", address);
+                    $stop;
+                end
+
                 //nothing to do with these, just advance the queue
                 valid_queue.pop_front();
                 robtag_queue.pop_front();
-                this.dcache[address_queue.pop_front()] = data_queue.pop_front(); //store data into memory
             end
 
             //push instructions to queue
@@ -246,7 +276,7 @@ class FunctionalUnit#(
         input logic [ROBTAG_WIDTH-1:0] i_robtag,
         output DATA_T o_rd,
         output DATA_T o_pc,
-        output DATA_T o_taken,
+        output logic o_taken,
         output logic  o_valid,
         output logic [ROBTAG_WIDTH-1:0] o_robtag
     );
@@ -272,7 +302,7 @@ class FunctionalUnit#(
             robtag_queue.push_back(i_robtag);
         end
         else if(i_jump_op == JALR_OP && i_valid) begin
-            DATA_T mask = '1; mask[0] = '0;
+            automatic DATA_T mask = '1; mask[0] = '0;
             rd_queue.push_back(i_pc + 3'b100);
             pc_queue.push_back((i_rs1 + i_imm) & mask);
             taken_queue.push_back('1);

@@ -6,7 +6,7 @@ class RVFrontend #(
     parameter type DECODER_T = decode_package::rv32iDecoder
 );
 
-    parameter int ROBTAG_WIDTH = $clog2(ROB_DEPTH);
+    localparam int ROBTAG_WIDTH = $clog2(ROB_DEPTH);
     protected MemoryMap #(.DATA_T(DATA_T)) memory_map;
 
     typedef struct {
@@ -229,8 +229,7 @@ class RVFrontend #(
     function automatic void writeRegister(
         input bit [4:0] i_rd_addr,
         input DATA_T i_rd_data,
-        input bit [ROBTAG_WIDTH-1:0] i_rd_tag,
-        input bit i_rd_valid
+        input bit [ROBTAG_WIDTH-1:0] i_rd_tag
     );
         this.regfile.locks[i_rd_addr].get();
         this.regfile.regs[i_rd_addr] = i_rd_data;
