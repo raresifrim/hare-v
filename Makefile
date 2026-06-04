@@ -1,4 +1,4 @@
-simulator = vivado
+simulator = verilator
 wave_viewer = manual
 fpga_part = xc7a35tcpg236-1
 openfpga_board = cmoda7_35t

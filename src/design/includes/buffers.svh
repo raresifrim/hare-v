@@ -101,27 +101,22 @@ module sync_fifo #(
         output logic                     o_full     // FIFO is full when high,
     );
 
-    logic [$clog2(DEPTH)-1:0] wptr;
-    logic [$clog2(DEPTH)-1:0] rptr;
+    localparam int AW = $clog2(DEPTH);
 
-    logic w_almost_full, w_almost_empty;
-    logic r_full, r_empty;
+    logic [AW:0] wptr;
+    logic [AW:0] rptr;
     DATA_T fifo [DEPTH];
 
     always_ff @(posedge clk) begin
         if (rst || i_clear) begin
             wptr <= 0;
-            r_full <= '0;
         end
         else begin
-            if (i_wr_en & !o_full) begin
+            logic [AW:0] wbin;
+            wbin = wptr + 1'(i_wr_en & !o_full);
+            wptr <= wbin;
+            if (i_wr_en & !o_full)
                 fifo[wptr] <= i_data;
-                wptr <= wptr + 1'b1;
-                if(w_almost_full)
-                    r_full <= '1;
-            end
-            else if(o_full && i_rd_en)
-                r_full <= '0;
         end
     end
 
@@ -134,24 +129,18 @@ module sync_fifo #(
         if (rst || i_clear) begin
             rptr <= 0;
             o_data <= '0;
-            r_empty <= '1;
         end
         else begin
-            if (i_rd_en & !o_empty) begin
-                o_data <= fifo[rptr];
-                rptr <= rptr + 1'b1;
-                if(w_almost_empty)
-                    r_empty <= '1;
-            end
-            else if(o_empty && i_wr_en)
-                r_empty <= '0;
+            logic [AW:0] rbin;
+            rbin = rptr + 1'(i_rd_en & !o_empty);
+            rptr <= rbin;
+            o_data <= fifo[rptr];
         end
     end
 
-    assign w_almost_full = wptr + 1'b1 == rptr;
-    assign w_almost_empty = rptr + 1'b1 == wptr;
-    assign o_full  = r_full;
-    assign o_empty = r_empty;
+    assign o_full = (wptr[AW] != rptr[AW]) && (wptr[AW-1:0] == rptr[AW-1:0]);
+    assign o_empty = (rptr == wptr);
+
 endmodule
 
 
@@ -280,8 +269,7 @@ module queue#(
     logic bypass_rg  = 1'b1; // Bypass signal to data and data valid muxes
     logic w_ready;
 
-    always_ff@(posedge clk)
-        hsup.ready <= bypass_rg;
+    assign hsup.ready = bypass_rg;
 
     always_ff @(posedge clk) begin
         if (rst || i_clear) begin
@@ -310,25 +298,48 @@ module queue#(
     assign w_valid = bypass_rg ? hsup.valid : 1'b1    ;  // Data valid mux
     assign w_ready = ~w_full;
 
-    logic w_empty;
-    sync_fifo #(
-        .DEPTH(DEPTH),
-        .DATA_T(data_t),
-        .DEBUG(DEBUG),
-        .FIFO_NAME(QUEUE_NAME)
-    ) fifo_inst(
-        .clk(clk),
-        .rst(rst),
-        .i_clear(i_clear),
-        .i_wr_en(w_valid), // Write enable
-        .i_rd_en(hsdown.ready), // Read enable
-        .i_data(w_data),  // Data written into FIFO
-        .o_data(hsdown.data),  // Data read from FIFO
-        .o_empty(w_empty), // FIFO is empty when high
-        .o_full(w_full)   // FIFO is full when high
-    );
+    localparam int AW = $clog2(DEPTH);
 
-    always_ff@(posedge clk)
-        hsdown.valid <= ~w_empty;
+    logic [AW:0] wptr;
+    logic [AW:0] rptr;
+    data_t fifo [DEPTH];
+
+    always_ff @(posedge clk) begin
+        if (rst || i_clear) begin
+            wptr <= 0;
+        end
+        else begin
+            logic [AW:0] wbin;
+            wbin = wptr + 1'(w_valid & !w_full);
+            wptr <= wbin;
+            if (w_valid & !w_full)
+                fifo[wptr] <= w_data;
+        end
+    end
+
+    // FWFT read.  Advance only on a real downstream transfer (valid && ready),
+    // never on bare ready, so an always-ready consumer can't skip words.
+    logic consume;
+    assign consume = hsdown.valid & hsdown.ready;
+
+    always_ff @(posedge clk) begin
+        if (rst || i_clear) begin
+            rptr         <= 0;
+            hsdown.data  <= '0;
+            hsdown.valid <= 1'b0;
+        end
+        else begin
+            logic [AW:0] rbin;
+            rbin = rptr + 1'(consume);
+            rptr <= rbin;
+            hsdown.data  <= fifo[rbin[AW-1:0]];
+            // valid asserts one cycle after the head settles in hsdown.data.
+            // Compare rbin to wptr as of this cycle: a write on this same edge
+            // is not visible to the data read until the following cycle.
+            hsdown.valid <= (rbin != wptr);
+        end
+    end
+
+    assign w_full = (wptr[AW] != rptr[AW]) && (wptr[AW-1:0] == rptr[AW-1:0]);
 
 endmodule

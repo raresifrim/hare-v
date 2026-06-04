@@ -95,7 +95,9 @@ puts "\n###Creating sim_build dir###"
 set outputDir ./build/sim
 file mkdir $outputDir
 cd $outputDir
-file delete -force -- {*}[glob -nocomplain *]
+set _cleanup [glob -nocomplain *]
+if {[llength $_cleanup]} { file delete -force -- {*}$_cleanup }
+unset _cleanup
 puts "Current working directory: [pwd]"
 
 if {[string match "vivado" $simulator]} {

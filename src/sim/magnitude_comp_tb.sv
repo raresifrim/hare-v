@@ -95,9 +95,9 @@ module xilinx_magnitude_comp_tb();
                 $error("[ERROR] Unexpected o_valid asserted! Scoreboard is empty.");
                 $stop;
             end
-            
+
             pkt = scoreboard.pop_front();
-            
+
             if (o_comp_result !== pkt.exp_res) begin
                 $error("[FAIL] A:%h B:%h Sgn:%b | Exp:%s Got:%s", 
                         pkt.a, pkt.b, pkt.is_signed, pkt.exp_res.name(), o_comp_result.name());
@@ -117,11 +117,11 @@ module xilinx_magnitude_comp_tb();
             i_rs1 = a;
             i_rs2 = b;
             i_signed = sgn;
-            
+
             pkt.a = a; pkt.b = b; pkt.is_signed = sgn;
             pkt.exp_res = get_expected(a, b, sgn);
             scoreboard.push_back(pkt);
-            
+
             @(posedge clk);
         end
     endtask
