@@ -1,3 +1,5 @@
+`ifndef VERILOG_XILINX_SVH
+`define VERILOG_XILINX_SVH
 /* LIST OF XILINX PRIMITIVES USED FOR SIMULATION IN VERILATOR */
 //
 // FDRE primitive for Xilinx FPGAs
@@ -828,3 +830,5 @@ module DSP48E2
 
 endmodule
 /* verilator coverage_on */
+
+`endif // VERILOG_XILINX_SVH

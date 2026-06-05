@@ -35,7 +35,15 @@ module xilinx_alu_unit#(
 
     if(IMPL == "DSP") begin
         //TODO: to be implemented
-        xilinx_dsp_alu#(.DATA_WIDTH(DATA_WIDTH),.FPGA_FAMILY(FPGA_FAMILY)) xilinx_dsp_alu_inst(.*);
+        xilinx_dsp_alu #(.DATA_WIDTH(DATA_WIDTH),.FPGA_FAMILY(FPGA_FAMILY)) alu_inst_high(
+                .clk(clk),
+                .rst(rst),
+                .A(i_rs1),
+                .B(i_rs2),
+                .ALUMODE(i_alu_op),
+                .P(o_rd),
+                .CARRYOUT(/*open*/)
+            );
     end
 
     else begin
@@ -64,9 +72,15 @@ module xilinx_alu_unit#(
         if (EXTRA_PIPE == "TRUE") begin
             logic [DATA_WIDTH/2-1:0] r_rd;
             logic r_carry;
-            xilinx_aluNb #(.N(DATA_WIDTH/2),.REGISTER_OUTPUT("TRUE")) alu_inst_low(
+            xilinx_aluNb #(
+                .DATA_WIDTH(DATA_WIDTH/2),
+                .FPGA_FAMILY(FPGA_FAMILY),
+                .REGISTER_OUTPUT("TRUE"),
+                .FIRST_IN_CHAIN("TRUE")
+            ) alu_inst_low(
                 .clk(clk),
                 .rst(rst),
+                .CI(1'b0),
                 .A(r_rs1[DATA_WIDTH/2-1:0]),
                 .B(r_rs2[DATA_WIDTH/2-1:0]),
                 .ALUMODE(r_alu_op),
@@ -82,7 +96,7 @@ module xilinx_alu_unit#(
                 if(rst) begin
                     r2_rs1 <= '0;
                     r2_rs2 <= '0;
-                    r2_alu_op <= '0;
+                    r2_alu_op <= alu_op_t'(0);
                     r2_valid <= '0;
                 end
                 else begin
@@ -93,11 +107,17 @@ module xilinx_alu_unit#(
                 end
             end
 
-            xilinx_aluNb #(.N(DATA_WIDTH/2),.REGISTER_OUTPUT("TRUE")) alu_inst_high(
+            xilinx_aluNb #(
+                .DATA_WIDTH(DATA_WIDTH/2),
+                .FPGA_FAMILY(FPGA_FAMILY),
+                .REGISTER_OUTPUT("TRUE"),
+                .FIRST_IN_CHAIN("FALSE")
+            )alu_inst_high(
                 .clk(clk),
                 .rst(rst),
                 .A(r2_rs1),
                 .B(r2_rs2),
+                .CI(r_carry),
                 .ALUMODE(r2_alu_op),
                 .P(o_rd[DATA_WIDTH-1:DATA_WIDTH/2]),
                 .CARRYOUT(/*open*/)
@@ -117,11 +137,17 @@ module xilinx_alu_unit#(
 
         end
         else begin
-            xilinx_aluNb #(.N(DATA_WIDTH),.REGISTER_OUTPUT("TRUE")) alu_inst(
+            xilinx_aluNb #(
+                .DATA_WIDTH(DATA_WIDTH),
+                .FPGA_FAMILY(FPGA_FAMILY),
+                .REGISTER_OUTPUT("TRUE"),
+                .FIRST_IN_CHAIN("TRUE")
+            )alu_inst(
                 .clk(clk),
                 .rst(rst),
                 .A(r_rs1),
                 .B(r_rs2),
+                .CI(1'b0),
                 .ALUMODE(r_alu_op),
                 .P(o_rd),
                 .CARRYOUT(/*open*/)
@@ -148,11 +174,11 @@ module xilinx_dsp_alu#(
     )(
         input  logic                  clk,
     (*direct_reset="true"*)input logic rst,
-        input  alu_op_t             alu_op,
-        input  logic [DATA_WIDTH-1:0] i_rs1,
-        input  logic [DATA_WIDTH-1:0] i_rs2,
-        output logic [DATA_WIDTH-1:0] o_rd,
-        output logic                  o_carry
+        input  alu_op_t             ALUMODE,
+        input  logic [DATA_WIDTH-1:0] A,
+        input  logic [DATA_WIDTH-1:0] B,
+        output logic [DATA_WIDTH-1:0] P,
+        output logic                  CARRYOUT
     );
 
 
@@ -166,12 +192,14 @@ module xilinx_aluNb#(
     parameter int DATA_WIDTH = 32,
     parameter string FPGA_FAMILY = "ULTRASCALE", //ULTRSCALE/ARTIX7
     parameter string REGISTER_OUTPUT = "TRUE",
+    parameter string FIRST_IN_CHAIN = "TRUE", //the position of the alu in a larger chain
     localparam int N = FPGA_FAMILY == "ULTRASCALE" ? 8 : 4
 )(
     input logic          clk,
 (*direct_reset="true"*)input logic rst,
     input logic [DATA_WIDTH-1:0]  A,
     input logic [DATA_WIDTH-1:0]  B,
+    input logic                   CI,
     input alu_op_t              ALUMODE,
     output logic [DATA_WIDTH-1:0] P,
     output logic                  CARRYOUT
@@ -183,12 +211,11 @@ generate
     logic [DATA_WIDTH/N:0] CARRY;
     logic [DATA_WIDTH-1:0] P_w;
 
-    assign CARRY[0] = '0;
+    assign CARRY[0] = CI;
     for (i=0;i<DATA_WIDTH/N;i++) begin
-        localparam  string FIRST_IN_CHAIN = i == 0 ? "TRUE" : "FALSE";
         xilinx_alu4b #(
             .FPGA_FAMILY(FPGA_FAMILY),
-            .FIRST_IN_CHAIN(FIRST_IN_CHAIN)
+            .FIRST_IN_CHAIN(FIRST_IN_CHAIN == "TRUE" && i == 0 ? "TRUE" : "FALSE")
             ) alu4_inst(
             .clk(clk),
             .rst(rst),
@@ -259,8 +286,8 @@ module xilinx_alu4b#(
         CARRY8 CARRY8_inst (
             .CI(FIRST_IN_CHAIN == "TRUE" ? ALUMODE[0] : CI),
             .CI_TOP('0),
-            .DI(G),
-            .S(P),
+            .DI(O5),
+            .S(O6),
             .CO(CarryOuts),
             .O(S)
         );
